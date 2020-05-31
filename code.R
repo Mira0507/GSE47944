@@ -280,6 +280,7 @@ clean_data <- function(df, label_threshold) {
                 
 }
 
+# data frames for volcano plots
 stats_psoriasis_dmso_1 <- clean_data(stats_psoriasis_dmso, 25)
 stats_normal_dmso_1 <- clean_data(stats_normal_dmso, 12.5)
 stats_disease_untreated_1 <- clean_data(stats_disease_untreated, 4)
@@ -325,7 +326,7 @@ volcano_plot <- function(df, tit) {
                 xlab("Log2 Fold Change") +
                 ylab("-Log10 Adjusted P-value") + 
                 ggtitle(tit) +
-                scale_color_manual(values = c("blue", "#999999", "red")) + 
+                scale_color_manual(values = c("red", "#999999", "blue")) + 
                 geom_text_repel(color = "black")
 }
 
