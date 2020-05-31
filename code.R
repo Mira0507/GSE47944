@@ -236,9 +236,54 @@ stats_psoriasis_antagonist <- get_results_table("psoriasis_antagonist")
 
 stats_interaction <- get_results_table("interaction")
 
+# P value data frame 
+pval_df <- data.frame(disease_untreated = stats_disease_untreated$P.Value,
+                      disease_dmso = stats_disease_dmso$P.Value,
+                      disease_agonist = stats_disease_agonist$P.Value,
+                      disease_antagonist = stats_disease_antagonist$P.Value,
+                      normal_dmso = stats_normal_dmso$P.Value,
+                      normal_agonist = stats_normal_agonist$P.Value,
+                      normal_antagonist = stats_normal_antagonist$P.Value,
+                      psoriasis_dmso = stats_psoriasis_dmso$P.Value,
+                      psoriasis_agonist = stats_psoriasis_agonist$P.Value,
+                      psoriasis_antagonist = stats_psoriasis_antagonist$P.Value,
+                      interaction = stats_interaction$P.Value) %>%
+        gather(Contrast, 
+               P.Value) %>%
+        mutate(Contrast = factor(Contrast,
+                                 levels = c("disease_untreated",
+                                            "disease_dmso",
+                                            "disease_agonist",
+                                            "disease_antagonist",
+                                            "normal_dmso",
+                                            "normal_agonist",
+                                            "normal_antagonist",
+                                            "psoriasis_dmso",
+                                            "psoriasis_agonist",
+                                            "psoriasis_antagonist",
+                                            "interaction")))
 
 
+################################## Data Cleaning for Presentation ############################
+gene_symbols <- fit2$genes[, "symbol"]
 
+clean_data <- function(df, label_threshold) {
+        df %>% mutate(LogOdds = -log10(adj.P.Val),
+                      Category = case_when(adj.P.Val < 0.05 & logFC > 0 ~ "Up-regulated",
+                                           adj.P.Val < 0.05 & logFC < 0 ~ "Down-regulated",
+                                           adj.P.Val > 0.05 ~ "Insignificant"),
+                      Label = ifelse(LogOdds > label_threshold, symbol, "")) %>%
+                mutate(Category = factor(Category, 
+                                         levels = c("Up-regulated",
+                                                    "Insignificant",
+                                                    "Down-regulated")))
+                
+}
+
+stats_psoriasis_dmso_1 <- clean_data(stats_psoriasis_dmso, 25)
+stats_normal_dmso_1 <- clean_data(stats_normal_dmso, 12.5)
+stats_disease_untreated_1 <- clean_data(stats_disease_untreated, 4)
+        
 #################################### Plotting #####################################
 
 contrasts_summary_plot <- 
@@ -253,7 +298,54 @@ contrasts_summary_plot <-
         xlab("Affected Gene Number") + 
         ggtitle("Summary of Gene Expression Change")
 
+pval_plot <- 
+        ggplot(pval_df,
+               aes(x = P.Value,
+                   fill = Contrast,
+                   color = Contrast)) + 
+        geom_density(alpha = 0.3) +
+        theme_bw() + 
+        xlab("P-Value") + 
+        ylab("Proportion") + 
+        ggtitle("Distribution of P-Values over Contrasts")
 
+
+
+library(ggrepel)
+
+volcano_plot <- function(df, tit) {
+        ggplot(df,
+               aes(x = logFC,
+                   y = LogOdds,
+                   color = Category,
+                   label = Label)) +
+                geom_point(alpha = 0.3) + 
+                theme_bw() + 
+                scale_x_continuous(limits = c(-6, 6)) + 
+                xlab("Log2 Fold Change") +
+                ylab("-Log10 Adjusted P-value") + 
+                ggtitle(tit) +
+                scale_color_manual(values = c("blue", "#999999", "red")) + 
+                geom_text_repel(color = "black")
+}
+
+volcano_psoriasis_dmso <- volcano_plot(stats_psoriasis_dmso_1,
+                                       "Gene Expression in Psoriasis Skin under DMSO vs Untreated Condition")
+
+volcano_normal_dmso <- volcano_plot(stats_normal_dmso_1,
+                                    "Gene Expression in Normal Skin under DMSO vs Untreated Condition")
+
+volcano_disease_untreated <- volcano_plot(stats_disease_untreated_1,
+                                          "Gene Expression in Psoriasis vs Normal Skin under Untreated Condition")
+
+                                    
+                                     
+library(gridExtra)
+
+grid.arrange(volcano_normal_dmso,
+             volcano_psoriasis_dmso,
+             volcano_disease_untreated,
+             nrow = 3)
 
 
 
