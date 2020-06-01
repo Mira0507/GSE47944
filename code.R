@@ -284,6 +284,15 @@ clean_data <- function(df, label_threshold) {
 stats_psoriasis_dmso_1 <- clean_data(stats_psoriasis_dmso, 25)
 stats_normal_dmso_1 <- clean_data(stats_normal_dmso, 12.5)
 stats_disease_untreated_1 <- clean_data(stats_disease_untreated, 4)
+
+# data frames for a heat map
+stats_disease_untreated_2 <- subset(stats_disease_untreated, 
+                                    adj.P.Val < 0.05)
+untreated_samples <- subset(pData(eset), treatment == "Untreated")
+count_disease_untreated <- exprs(eset)[stats_disease_untreated_2$symbol, ]
+count_disease_untreated1 <- count_disease_untreated[, rownames(untreated_samples)]
+
+
         
 #################################### Plotting #####################################
 
@@ -311,6 +320,11 @@ pval_plot <-
         ggtitle("Distribution of P-Values over Contrasts")
 
 
+normal_psoriasis_heatmap <- 
+        pheatmap(count_disease_untreated1,
+                 annotation = select(untreated_samples, 
+                                     disease),
+                 main = "Normalized Gene Expression Profile in Normal vs Psoriasis Skin")
 
 library(ggrepel)
 
@@ -347,6 +361,7 @@ grid.arrange(volcano_normal_dmso,
              volcano_psoriasis_dmso,
              volcano_disease_untreated,
              nrow = 3)
+
 
 
 
