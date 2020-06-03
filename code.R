@@ -25,45 +25,40 @@ replace_letter <- function(vec) {
 }
 
 
-                 
+
 ps1 <- ps %>%
         mutate(Gene = replace_letter(Gene)) %>%
         separate(Gene, c("ID", "symbol"), sep = " ")
 
 # ps_f: feature matrix
 ps_2 <- ps1 %>%
-        transmute(ensgene = ID, symbol = symbol) %>%
-        left_join(grch38, by = "ensgene", suffix = c("_ps", "_db")) 
-
-ps_3 <- ps_2[!duplicated(ps_2$ensgene), ] 
-
-ps_4 <- ps_3[, c("symbol_ps", "entrez", "chr")] %>%
+        transmute(ensgene = ID, 
+                  symbol = symbol) %>%
+        left_join(grch38, by = "symbol", suffix = c("_ps", "_db")) %>%
         filter(!is.na(entrez))
 
-names(ps_4) <- c("symbol", "entrez", "chrom")
-
-ps_5 <- ps_4[!duplicated(ps_4$symbol), ] %>%
+ps_3 <- ps_2[, c("symbol", "entrez", "chr")] %>%
+        filter(!duplicated(symbol)) %>%
         mutate(entrez = as.character(entrez))
 
-ps_6 <- as.matrix(ps_5)
+ps_4 <- as.matrix(ps_3) 
+rownames(ps_4) <- ps_3$symbol
 
-rownames(ps_6) <- ps_5$symbol
+ps_f <- as.data.frame(ps_4)
 
-ps_f <- as.data.frame(ps_6)  
 
 
 # ps_x: expression matrix 
 
-ps_7 <- subset(ps1, symbol %in% ps_f$symbol)
 
-ps_8 <- ps_7[!duplicated(ps_7$symbol), ] %>%
-        right_join(ps_f, by = "symbol") %>% 
-        select(symbol, Sample_PDM_K1_1:Sample_N254_4) 
+ps_5 <-  subset(ps1, symbol %in% ps_f$symbol) %>%
+        filter(!duplicated(symbol))
 
-ps_x <- as.matrix(ps_8[, -1])
+ps_6 <- ps_5[, colnames(ps)[-1]] %>%
+        as.matrix()
 
-rownames(ps_x) <- ps_8$symbol
-
+rownames(ps_6) <- ps_f$symbol
+ps_x <- ps_6
 
 
 # ps_p: phenotype matrix
@@ -81,8 +76,7 @@ ps_9$treatment <- trt
 colnames(ps_x) <- ps_9$sample
 ps_10 <- as.matrix(ps_9)
 rownames(ps_10) <- ps_9$sample 
-ps_p <- as.data.frame(ps_10) %>%
-        select(-sample)
+ps_p <- as.data.frame(ps_10)[, -1]
 
 
 ############################## Create ExpressionSet ################################
@@ -133,9 +127,7 @@ plotDensities(eset,
 cor_mat <- cor(exprs(eset))
 library(pheatmap)
 pheatmap(cor_mat,
-         annotation = select(pData(eset), 
-                             disease, 
-                             treatment),
+         annotation = pData(eset)[, c("disease", "treatment")],
          main = "Hierarchical Clustering")
 
 # PCA 
@@ -162,8 +154,6 @@ colnames(design) <- levels(group)
 
 biological_replicates <- colSums(design) 
 
-
-
 # cm: contrast matrix
 
 cm <- makeContrasts(disease_untreated = Psoriasis_Untreated - Normal_Untreated,
@@ -186,12 +176,11 @@ fit1 <- contrasts.fit(fit, contrasts = cm)
 fit2 <- eBayes(fit1)
 res <- decideTests(fit2)
 
-
-
 # additional data cleaning for plotting 
-res_summary <- as.data.frame(summary(res)) %>%
-        rownames_to_column() %>%
-        select(-rowname) %>%
+res_summary0 <- as.data.frame(summary(res)) %>%
+        rownames_to_column()
+
+res_summary <- res_summary0[, -1] %>%
         spread(Var1, Freq)
 
 names(res_summary) <- c("Group", "Down-regulated", "Insignificant", "Up-regulated")
@@ -277,7 +266,7 @@ clean_data <- function(df, label_threshold) {
                                          levels = c("Up-regulated",
                                                     "Insignificant",
                                                     "Down-regulated")))
-                
+        
 }
 
 # data frames for volcano plots
@@ -289,11 +278,72 @@ stats_disease_untreated_1 <- clean_data(stats_disease_untreated, 4)
 stats_disease_untreated_2 <- subset(stats_disease_untreated, 
                                     adj.P.Val < 0.05)
 untreated_samples <- subset(pData(eset), treatment == "Untreated")
+
+
 count_disease_untreated <- exprs(eset)[stats_disease_untreated_2$symbol, ]
 count_disease_untreated1 <- count_disease_untreated[, rownames(untreated_samples)]
 
+# data frame for affected gene list
+disease_fc <- subset(stats_disease_untreated, 
+                     adj.P.Val < 0.05) %>%
+        arrange(desc(logFC)) 
+disease_fc1 <- rbind(disease_fc[1:10, ], 
+                     disease_fc[451:460, ]) %>%
+        mutate(Category = ifelse(logFC > 0, 
+                                 "Up-regulated", 
+                                 "Down-regulated"),
+               Category = factor(Category,
+                                 levels = c("Up-regulated", 
+                                            "Down-regulated")))
 
-        
+
+###################################### GSEA ####################################
+
+
+# data cleaning for GO GSEA
+disease_untreated_gene_list <- disease_fc$logFC
+names(disease_untreated_gene_list) <- disease_fc$symbol
+disease_untreated_gene_list1 = sort(disease_untreated_gene_list, decreasing = TRUE)
+
+library(clusterProfiler)
+library(DOSE)
+library(org.Hs.eg.db)
+
+# creating a GO object
+disease_untreated_GO <-
+        gseGO(geneList = disease_untreated_gene_list1, 
+              ont = "ALL", 
+              keyType = "SYMBOL", 
+              nPerm = 10000, 
+              minGSSize = 3, 
+              maxGSSize = 800, 
+              pvalueCutoff = 0.05, 
+              verbose = TRUE, 
+              OrgDb = org.Hs.eg.db, 
+              pAdjustMethod = "none")
+
+# data cleaning for KEGG GSEA
+disease_untreated_gene_list2 <- disease_fc$logFC
+names(disease_untreated_gene_list2) <- disease_fc$entrez
+disease_untreated_gene_list3 <- sort(disease_untreated_gene_list2, decreasing = TRUE)
+
+# creating a KEGG object
+disease_untreated_KEGG <-
+        gseKEGG(geneList     = disease_untreated_gene_list3,
+                organism     = "hsa",
+                nPerm        = 10000,
+                minGSSize    = 3,
+                maxGSSize    = 800,
+                pvalueCutoff = 0.05,
+                pAdjustMethod = "none",
+                keyType       = "ncbi-geneid")
+
+
+
+
+
+
+
 #################################### Plotting #####################################
 
 contrasts_summary_plot <- 
@@ -322,9 +372,22 @@ pval_plot <-
 
 normal_psoriasis_heatmap <- 
         pheatmap(count_disease_untreated1,
-                 annotation = select(untreated_samples, 
-                                     disease),
+                 annotation = untreated_samples[, c("disease", "treatment")],
                  main = "Normalized Gene Expression Profile in Normal vs Psoriasis Skin")
+
+gene_rank_plot <- 
+        ggplot(disease_fc1, 
+               aes(x = logFC,
+                   y = reorder(symbol, logFC),
+                   fill = Category)) +
+        geom_bar(stat = "identity") +
+        scale_fill_manual(values=c("red", "blue")) +
+        theme_bw() +
+        xlab("Log2 Fold Change") +
+        ylab("Genes") + 
+        ggtitle("10 Most Up- and Down-regulated Genes") +
+        scale_x_continuous(limits = c(-5, 5))
+
 
 library(ggrepel)
 
@@ -353,8 +416,8 @@ volcano_normal_dmso <- volcano_plot(stats_normal_dmso_1,
 volcano_disease_untreated <- volcano_plot(stats_disease_untreated_1,
                                           "Gene Expression in Psoriasis vs Normal Skin under Untreated Condition")
 
-                                    
-                                     
+
+
 library(gridExtra)
 
 grid.arrange(volcano_normal_dmso,
@@ -362,11 +425,46 @@ grid.arrange(volcano_normal_dmso,
              volcano_disease_untreated,
              nrow = 3)
 
+# GSEA plots
 
 
 
-        
-        
+disease_untreated_GO_dot <- 
+        dotplot(disease_untreated_GO, 
+                showCategory = 10, 
+                split=".sign") + 
+        facet_grid(.~.sign) + 
+        ggtitle("Biological Events in Psoriasis vs Normal Skin: GO") + 
+        theme(axis.text.y = element_text(size = 12))
 
 
+disease_untreated_GO_ridge <-
+        ridgeplot(disease_untreated_GO) + 
+        labs(x = "Enrichment Distribution") + 
+        ggtitle("Fold Change Distribution") + 
+        theme(axis.text.y = element_text(size = 11)) 
 
+disease_untreated_GO_emap <- 
+        emapplot(disease_untreated_GO, 
+                 showCategory = 10)
+
+
+disease_untreated_GO_cnet <- 
+        cnetplot(disease_untreated_GO, 
+                 categorySize = "enrichmentScore", 
+                 foldChange = disease_untreated_gene_list1, 
+                 showCategory = 3)
+
+disease_untreated_KEGG_dot <- 
+        dotplot(disease_untreated_KEGG, 
+                showCategory = 10, 
+                title = "Biological Events in Psoriasis vs Normal Skin: KEGG" , 
+                split=".sign") + 
+        facet_grid(.~.sign) +
+        theme(axis.text.y = element_text(size = 12))
+
+disease_untreated_KEGG_ridge <-
+        ridgeplot(disease_untreated_KEGG) + 
+        labs(x = "Enrichment Distribution") + 
+        ggtitle("Fold Change Distribution") + 
+        theme(axis.text.y = element_text(size = 11)) 
